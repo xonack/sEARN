@@ -1,14 +1,15 @@
-;; Declare necessary imports and constants
+;; Assume .sBTC is a fungible token (FT) and we have a sip-010 trait implemented for it
 (use-trait ft-trait .sip-010-trait)
 
-;; Data map to store task information including the locked funds
+;; Data map to store task information including the locked funds and time limit
 (define-map taskPools
   {taskId: uint}
   {
     poolSize: uint,
     payoutPerTask: uint,
     totalPaidOut: uint,
-    totalLockedFunds: uint
+    totalLockedFunds: uint,
+    timeLimit: uint
   }
 )
 
@@ -21,21 +22,19 @@
 ;; Variable to track the next task ID
 (define-data-var nextTaskId uint 0)
 
-;; Function to create a new task pool
-(define-public (createTask (poolSize uint) (payoutPerTask uint))
+;; Function to create a new task pool with a time limit
+(define-public (createTask (poolSize uint) (payoutPerTask uint) (timeLimit uint))
   (let ((taskId (var-get nextTaskId)))
     (begin
-      ;; Transfer sBTC from the task creator to the contract
       (try! (contract-call? .sBTC ft-transfer poolSize tx-sender (as-contract tx-sender)))
-      ;; Insert the new task into the taskPools map
       (map-insert taskPools {taskId: taskId}
         {
           poolSize: poolSize,
           payoutPerTask: payoutPerTask,
           totalPaidOut: u0,
-          totalLockedFunds: poolSize
+          totalLockedFunds: poolSize,
+          timeLimit: (+ (block-height) timeLimit)
         })
-      ;; Increment the next task ID
       (var-set nextTaskId (+ taskId u1))
       (ok taskId)
     )
@@ -43,53 +42,73 @@
 )
 
 ;; Function for workers to request a payout
-(define-public (requestPayout (taskId uint) (receivingAddress principal))
+(define-public (requestPayout (taskId uint) (receivingAddress principal) (searnSignature (buff 65)))
   (let ((task (map-get? taskPools {taskId: taskId})))
     (if (and task (is-some task))
-      (let ((payout (get payoutPerTask (unwrap-panic task))))
-        (map-insert payoutRequests {taskId: taskId, worker: receivingAddress} {amount: payout})
-        (ok true)
-      )
-      (err "Task does not exist")
-    )
-  )
+      (let ((currentBlockHeight (block-height))
+            (timeLimit (get timeLimit (unwrap-panic task))))
+        (if (<= currentBlockHeight timeLimit)
+          (if (verify-searn-signature searnSignature)
+            (let ((payout (get payoutPerTask (unwrap-panic task))))
+              (map-insert payoutRequests {taskId: taskId, worker: receivingAddress} {amount: payout})
+              (ok true))
+            (err "Invalid sEARN signature"))
+          (err "Time limit exceeded")))
+      (err "Task does not exist")))
 )
 
-;; Function to release payments
-(define-public (releasePayments (taskCreatorSignature (buff 65)))
-  (let ((taskId (verify-signature taskCreatorSignature)))
-    (if (not (is-none taskId))
-      (let ((requests (get-payout-requests (unwrap-panic taskId))))
+;; Function to release payments for a specific task
+(define-public (releasePayments (taskId uint) (taskCreatorSignature (buff 65)))
+  (let ((task (map-get? taskPools {taskId: taskId})))
+    (if (and task (is-some task))
+      (if (verify-task-creator-signature taskId taskCreatorSignature)
         (begin
-          ;; Check if there are enough locked funds to cover the payments
-          (asserts! (>= (get totalLockedFunds task) (get totalPaidOut task))
-                    (err "Insufficient locked funds"))
-          ;; Release payments to all workers
-          (release-all-payments requests)
-          ;; Clear payout requests
+          ;; Assuming release-all-payments handles the logic of paying out
+          (release-all-payments taskId)
+          ;; Clear payout requests after payments are done
           (map-delete payoutRequests {taskId: taskId})
-          (ok true)
-        )
-      )
-      (err "Invalid signature or task ID")
-    )
-  )
+          (ok true))
+        (err "Invalid task creator signature or task ID"))
+      (err "Task does not exist")))
 )
 
-;; Helper function to verify the signature (this is a placeholder and should be implemented)
-(define-private (verify-signature (signature (buff 65)))
-  ;; Placeholder for signature verification logic
-  ;; ...
+;; Function to withdraw the remaining task pool
+(define-public (withdrawTask (taskId uint) (taskCreatorSignature (buff 65)))
+  (let ((task (map-get? taskPools {taskId: taskId})))
+    (if (and task (is-some task))
+      (let ((currentBlockHeight (block-height))
+            (timeLimit (get timeLimit (unwrap-panic task))))
+        (if (and (> currentBlockHeight timeLimit)
+                 (verify-task-creator-signature taskCreatorSignature))
+          (begin
+            (try! (contract-call? .sBTC ft-transfer
+                                   (get totalLockedFunds (unwrap-panic task))
+                                   (as-contract tx-sender)
+                                   tx-sender))
+            (map-delete taskPools {taskId: taskId})
+            (ok true))
+          (err "Time limit has not expired or invalid signature")))
+      (err "Task does not exist")))
 )
 
-;; Helper function to get all payout requests for a task (this is a placeholder and should be implemented)
-(define-private (get-payout-requests (taskId uint))
-  ;; Placeholder for retrieving all payout requests
-  ;; ...
+;; Placeholder helper function to verify the sEARN server signature
+(define-private (verify-searn-signature (signature (buff 65)))
+  ;; Signature verification logic goes here
+  ;; Return true if signature is valid
+  (ok true) ;; Stubbed for example
 )
 
-;; Helper function to release all payments (this is a placeholder and should be implemented)
-(define-private (release-all-payments (requests (list 128 {taskId: uint, worker: principal, amount: uint})))
-  ;; Placeholder for payment release logic
+;; Placeholder helper function to verify the task creator signature
+(define-private (verify-task-creator-signature (signature (buff 65)))
+  ;; Task creator signature verification logic goes here
+  ;; Return the taskId if signature is valid
+  (ok u1) ;; Stubbed for example
+)
+
+;; Helper function to release all payments for a given task
+(define-private (release-all-payments (taskId uint))
+  ;; Implement the logic to iterate over all payout requests for the task
+  ;; and send the payments
   ;; ...
+  (ok true) ;; Stubbed for example, should implement actual logic
 )

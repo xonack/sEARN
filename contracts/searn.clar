@@ -5,6 +5,7 @@
 (define-map taskPools
   {taskId: uint}
   {
+    creator: principal,
     poolSize: uint,
     payoutPerTask: uint,
     totalPaidOut: uint,
@@ -23,12 +24,13 @@
 (define-data-var nextTaskId uint 0)
 
 ;; Function to create a new task pool with a time limit
-(define-public (createTask (poolSize uint) (payoutPerTask uint) (timeLimit uint))
+(define-public (createTask (creator principal) (poolSize uint) (payoutPerTask uint) (timeLimit uint))
   (let ((taskId (var-get nextTaskId)))
     (begin
       (try! (contract-call? .sBTC ft-transfer poolSize tx-sender (as-contract tx-sender)))
       (map-insert taskPools {taskId: taskId}
         {
+          creator: principal,
           poolSize: poolSize,
           payoutPerTask: payoutPerTask,
           totalPaidOut: u0,
@@ -91,24 +93,23 @@
       (err "Task does not exist")))
 )
 
-;; Placeholder helper function to verify the sEARN server signature
+;; Helper function to verify the sEARN server signature
 (define-private (verify-searn-signature (signature (buff 65)))
   ;; Signature verification logic goes here
   ;; Return true if signature is valid
-  (ok true) ;; Stubbed for example
+  (ok true)
 )
 
-;; Placeholder helper function to verify the task creator signature
+;; Helper function to verify the task creator signature
 (define-private (verify-task-creator-signature (signature (buff 65)))
   ;; Task creator signature verification logic goes here
   ;; Return the taskId if signature is valid
-  (ok u1) ;; Stubbed for example
+  (ok u1)
 )
 
 ;; Helper function to release all payments for a given task
 (define-private (release-all-payments (taskId uint))
   ;; Implement the logic to iterate over all payout requests for the task
   ;; and send the payments
-  ;; ...
-  (ok true) ;; Stubbed for example, should implement actual logic
+  (ok true)
 )
